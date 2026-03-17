@@ -163,10 +163,32 @@
       this._getState = getState;
 
       canvas.addEventListener('keydown', e => this._onKey(e));
-      canvas.addEventListener('click',      () => this._onFlap());
-      canvas.addEventListener('touchstart', () => this._onFlap(), { passive: true });
+      canvas.addEventListener('click', () => this._onFlap());
       // Also listen on window so keyboard works without canvas focus
       window.addEventListener('keydown', e => this._onKey(e));
+
+      // Touch: short tap = flap, long press (>=400ms) = laser
+      const LONG_PRESS_MS = 400;
+      let _touchTimer = null;
+      let _touchFired = false;
+
+      canvas.addEventListener('touchstart', e => {
+        e.preventDefault();
+        _touchFired = false;
+        _touchTimer = setTimeout(() => {
+          _touchFired = true; // long press — fire laser
+          if (this._getState() === 'PLAYING') this.pendingLaser = true;
+        }, LONG_PRESS_MS);
+      }, { passive: false });
+
+      canvas.addEventListener('touchend', () => {
+        clearTimeout(_touchTimer);
+        if (!_touchFired) this._onFlap(); // short tap — flap
+      });
+
+      canvas.addEventListener('touchcancel', () => {
+        clearTimeout(_touchTimer);
+      });
     }
 
     _onKey(e) {
@@ -181,7 +203,11 @@
     }
 
     _onFlap() {
-      if (this._getState() === 'PAUSED') return; // suppress flap when paused
+      if (this._getState() === 'PAUSED') {
+        // On mobile, a tap while paused should unpause (no keyboard available)
+        this.pendingPause = true;
+        return;
+      }
       this.pendingFlap = true;
     }
 
@@ -898,15 +924,26 @@
         this._h - barH / 2 + 6
       );
 
-      // Bottom-left: laser cooldown
+      // Bottom-left: laser cooldown (desktop: L key, mobile: hold)
       ctx.textAlign = 'left';
-      if (laserCooldownMs <= 0) {
-        ctx.fillStyle = '#00ffff';
-        ctx.fillText('⚡ LASER [L]', 12, this._h - barH / 2 + 6);
+      if (this._isMobile()) {
+        if (laserCooldownMs <= 0) {
+          ctx.fillStyle = '#00ffff';
+          ctx.fillText('⚡ Hold', 12, this._h - barH / 2 + 6);
+        } else {
+          const secs = Math.ceil(laserCooldownMs / 1000);
+          ctx.fillStyle = '#aaaaaa';
+          ctx.fillText(`⚡ ${secs}s`, 12, this._h - barH / 2 + 6);
+        }
       } else {
-        const secs = Math.ceil(laserCooldownMs / 1000);
-        ctx.fillStyle = '#aaaaaa';
-        ctx.fillText(`⚡ ${secs}s`, 12, this._h - barH / 2 + 6);
+        if (laserCooldownMs <= 0) {
+          ctx.fillStyle = '#00ffff';
+          ctx.fillText('⚡ LASER [L]', 12, this._h - barH / 2 + 6);
+        } else {
+          const secs = Math.ceil(laserCooldownMs / 1000);
+          ctx.fillStyle = '#aaaaaa';
+          ctx.fillText(`⚡ ${secs}s`, 12, this._h - barH / 2 + 6);
+        }
       }
     }
 
@@ -914,28 +951,36 @@
       const pulse = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(timestamp * 0.005));
 
       if (gameState === 'MENU') {
+        const startHint = this._isMobile() ? 'Tap to start' : 'Tap or press Space to start';
         this._drawOverlayBox(ctx, [
           { text: 'Flappy Kiro', size: 36, color: '#ffffff', y: 60 },
           { text: `Best: ${highScore}`, size: 20, color: '#ffffff', y: 100 },
-          { text: 'Tap or press Space to start', size: 16, color: '#ffffff', y: 140, alpha: pulse },
+          { text: startHint, size: 16, color: '#ffffff', y: 140, alpha: pulse },
         ]);
       } else if (gameState === 'IDLE') {
+        const startHint = this._isMobile() ? 'Tap to start' : 'Tap or press Space to start';
         this._drawOverlayBox(ctx, [
-          { text: 'Tap or press Space to start', size: 16, color: '#ffffff', y: 50, alpha: pulse },
+          { text: startHint, size: 16, color: '#ffffff', y: 50, alpha: pulse },
         ]);
       } else if (gameState === 'PAUSED') {
+        const resumeHint = this._isMobile() ? 'Tap to resume' : 'Tap / P / Esc to resume';
         this._drawOverlayBox(ctx, [
           { text: 'PAUSED', size: 32, color: '#ffffff', y: 55 },
-          { text: 'Press P or Esc to resume', size: 16, color: '#ffffff', y: 95, alpha: pulse },
+          { text: resumeHint, size: 16, color: '#ffffff', y: 95, alpha: pulse },
         ]);
       } else if (gameState === 'GAME_OVER') {
+        const restartHint = this._isMobile() ? 'Tap to restart' : 'Tap or press Space to restart';
         this._drawOverlayBox(ctx, [
           { text: 'GAME OVER', size: 32, color: '#ffffff', y: 55 },
           { text: `Score: ${score}`, size: 20, color: '#ffffff', y: 95 },
           { text: `Best: ${highScore}`, size: 20, color: '#FFD700', y: 125 },
-          { text: 'Tap or press Space to restart', size: 16, color: '#ffffff', y: 160, alpha: pulse },
+          { text: restartHint, size: 16, color: '#ffffff', y: 160, alpha: pulse },
         ]);
       }
+    }
+
+    _isMobile() {
+      return /Mobi|Android|iPhone|iPad|iPod|Touch/i.test(navigator.userAgent) || window.matchMedia('(pointer: coarse)').matches;
     }
 
     _drawOverlayBox(ctx, lines) {

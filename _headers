@@ -1,0 +1,16 @@
+# This file is copied into dist/ by the build script.
+# Netlify also reads netlify.toml headers — this acts as a fallback.
+
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+/game.min.js
+  Cache-Control: public, max-age=31536000, immutable
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin

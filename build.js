@@ -83,6 +83,11 @@ fs.mkdirSync('dist', { recursive: true });
     fs.copyFileSync(path.join('assets', file), path.join('dist', 'assets', file));
   }
 
+  // Copy _headers into dist/ for Netlify
+  if (fs.existsSync('_headers')) {
+    fs.copyFileSync('_headers', 'dist/_headers');
+  }
+
   // ---------------------------------------------------------------------------
   // 5. Verify all outputs exist and are non-zero
   // ---------------------------------------------------------------------------

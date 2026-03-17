@@ -1,0 +1,60 @@
+[build]
+  command     = "npm run build"
+  publish     = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+
+# ---------------------------------------------------------------------------
+# Asset caching — immutable long-lived cache for the minified bundle
+# (filename doesn't change, so we use a short max-age for the HTML entry point)
+# ---------------------------------------------------------------------------
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/game.min.js"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# ---------------------------------------------------------------------------
+# Security headers
+# ---------------------------------------------------------------------------
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options        = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy        = "strict-origin-when-cross-origin"
+    Permissions-Policy     = "interest-cohort=()"
+
+# ---------------------------------------------------------------------------
+# Performance — enable Netlify's built-in asset optimisation
+# ---------------------------------------------------------------------------
+
+[build.processing]
+  skip_processing = false
+
+[build.processing.css]
+  bundle  = false
+  minify  = false
+
+[build.processing.js]
+  bundle  = false
+  minify  = false
+
+[build.processing.html]
+  pretty_urls = false
+
+[build.processing.images]
+  compress = true
