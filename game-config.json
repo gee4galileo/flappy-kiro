@@ -1,0 +1,31 @@
+{
+  "physics": {
+    "gravity": 800,
+    "jumpVelocity": -300,
+    "terminalVelocity": 600,
+    "maxDeltaTime": 50
+  },
+  "pipes": {
+    "speed": 120,
+    "width": 60,
+    "gapHeight": 140,
+    "spacing": 350,
+    "spawnInterval": 1800
+  },
+  "clouds": {
+    "speed": 60,
+    "minInterval": 2000,
+    "maxInterval": 5000
+  },
+  "effects": {
+    "shakeIntensity": 5,
+    "shakeDuration": 300,
+    "particleMaxAge": 500,
+    "popupMaxAge": 600,
+    "popupRiseDistance": 30
+  },
+  "audio": {
+    "musicVolume": 0.4,
+    "sfxVolume": 1.0
+  }
+}
