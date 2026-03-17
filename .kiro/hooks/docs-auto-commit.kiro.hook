@@ -1,0 +1,13 @@
+{
+  "name": "Docs Auto-Commit",
+  "version": "1.0.0",
+  "description": "Automatically commits documentation changes when README.md or docs/*.md files are saved",
+  "when": {
+    "type": "fileEdited",
+    "patterns": ["README.md", "docs/*.md"]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A documentation file was just saved. Do the following:\n1. Run `git diff HEAD -- \"$FILE\"` (or use the saved file path from context) to see what changed\n2. Stage the file with `git add <filename>`\n3. Summarise the changes in one short line (e.g. 'add architecture diagram', 'update controls table', 'fix typo in physics section')\n4. Commit with the message: `docs: update <filename> — <one-line summary>`\n\nUse the actual filename (not a placeholder). Keep the summary concise and factual."
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "enabled": true,
+  "name": "Architecture Validation",
+  "description": "Manually triggered review of game.js for game architecture patterns, modular design, and collision detection correctness.",
+  "version": "1.0.0",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Review game.js for the following three areas only. Be specific — cite the function or class name for each issue found.\n\n1. GAME ARCHITECTURE PATTERNS\n- State transitions happening outside transitionTo() — this.state must never be set directly\n- Side-effects (audio, reset, shake) triggered outside transitionTo()\n- Components reading global state directly instead of receiving it via arguments\n- Renderer holding or mutating game logic state (it must be stateless w.r.t. game logic)\n- InputHandler.flush() called more than once per frame (flags must only be consumed once)\n- Game loop using setInterval instead of requestAnimationFrame\n- dt/elapsed computed inside a component instead of being passed in from the loop\n- Missing visibilitychange listener to reset _lastTimestamp on tab restore\n\n2. MODULAR DESIGN\n- Multiple unrelated responsibilities merged into one class\n- Classes reading CONFIG directly inside methods that should receive values as arguments\n- Private state not prefixed with _ (convention: this._field for private-by-convention)\n- Boolean flags not named as questions (should be isX, hasX, pendingX)\n- Constants that never change at runtime not using SCREAMING_SNAKE_CASE\n- ES module import/export used (must be plain script tags, compatible with file:// protocol)\n- Code outside the IIFE that pollutes global scope\n\n3. COLLISION DETECTION\n- Ghosty hitbox not using circular collision (radius 12px centered on sprite)\n- circleOverlapsRect not used for pipe and cloud collision checks\n- Boundary check not using the circular hitbox (cy - r <= 0 || cy + r >= canvasHeight)\n- Pipe scored check using wrong condition (must be ghosty center x > pipe.x + pipe.width)\n- Same pipe scored more than once (pipe.scored flag not checked before incrementing)\n- Collision check running outside PLAYING state\n\nReport findings grouped by category. If a category has no issues, say 'No issues found'. Do not report style, performance, or unrelated concerns."
+  },
+  "workspaceFolderName": "kiro-introduction",
+  "shortName": "architecture-validation"
+}

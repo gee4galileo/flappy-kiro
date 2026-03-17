@@ -1,0 +1,15 @@
+{
+  "enabled": true,
+  "name": "Code Quality Review",
+  "description": "Manually triggered review of game.js for Canvas API usage, event handler optimization, and memory management issues.",
+  "version": "1.0.0",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Review game.js for the following three areas only. Be specific — cite the function name or line context for each issue found.\n\n1. CANVAS API USAGE\n- ctx.save()/restore() used where no state actually changes (unnecessary overhead)\n- shadowBlur set but not reset to 0 after use (bleeds into subsequent draws)\n- canvas.width/height read inside the render loop instead of cached values\n- getContext() called more than once (should be called once at init)\n- Missing { alpha: false } option on getContext('2d') (free perf win since background is always fully redrawn)\n- Sub-pixel coordinates passed to drawImage (should use Math.round)\n\n2. EVENT HANDLER OPTIMIZATION\n- Event listeners added inside the game loop or update() (should be registered once at init)\n- Missing { passive: true } on touchstart/touchmove listeners\n- Duplicate listeners registered on both canvas and window for the same event\n- Event handlers that allocate closures on every call\n- Missing removeEventListener for listeners that should be cleaned up\n\n3. MEMORY MANAGEMENT\n- Object allocation inside the hot path (new objects created every frame in update/render)\n- Array.splice() called in forward iteration (causes index shifting bugs — must iterate backwards)\n- Array methods that allocate (map, filter, find, forEach) used per-frame instead of for-loops\n- Particle/popup objects not pooled (allocated and GC'd at 60fps)\n- setTimeout/setInterval callbacks that reference large closures\n\nReport findings grouped by category. If a category has no issues, say 'No issues found'. Do not report style, correctness, or unrelated concerns."
+  },
+  "workspaceFolderName": "kiro-introduction",
+  "shortName": "code-quality-review"
+}

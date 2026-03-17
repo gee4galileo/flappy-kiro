@@ -129,6 +129,7 @@
     constructor() {
       this.pendingFlap  = false;
       this.pendingPause = false;
+      this.pendingLaser = false;
       this._getState    = () => 'MENU'; // default before attach
     }
 
@@ -148,6 +149,8 @@
         this._onFlap();
       } else if (e.code === 'Escape' || e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
         this.pendingPause = true;
+      } else if (e.key === 'l' || e.key === 'L') {
+        if (this._getState() === 'PLAYING') this.pendingLaser = true;
       }
     }
 
@@ -157,9 +160,10 @@
     }
 
     flush() {
-      const result = { flap: this.pendingFlap, pause: this.pendingPause };
+      const result = { flap: this.pendingFlap, pause: this.pendingPause, laser: this.pendingLaser };
       this.pendingFlap  = false;
       this.pendingPause = false;
+      this.pendingLaser = false;
       return result;
     }
   }
@@ -276,10 +280,10 @@
             this.highScore = this.score;
             this._persist();
           }
-          return true;
+          return pipe; // return the pipe so caller can place popup
         }
       }
-      return false;
+      return null;
     }
 
     onGameOver() {
@@ -338,10 +342,50 @@
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // Laser helpers
+  // ---------------------------------------------------------------------------
+  const LASER_RECHARGE_MS  = 20000; // 20 seconds
+  const LASER_BEAM_DURATION = 300;  // ms the visual beam stays visible
+  const LASER_HOLE_SIZE    = 80;    // px added to pipe gap height
+
+  // Fire the laser: carve a hole in every pipe the beam passes through,
+  // return a beam object for rendering.
+  function fireLaser(ghosty, pipes, canvasWidth) {
+    const beamY = ghosty.y + ghosty.height / 2;
+
+    for (const pipe of pipes) {
+      // Does the beam y intersect this pipe's top or bottom section?
+      const hitsTop    = beamY < pipe.gapY;
+      const hitsBottom = beamY > pipe.gapY + pipe.gapHeight;
+      if (!hitsTop && !hitsBottom) continue;
+
+      if (hitsTop) {
+        // Carve from the bottom of the top pipe upward
+        const holeBottom = beamY + LASER_HOLE_SIZE / 2;
+        pipe.gapY     = Math.max(0, holeBottom - pipe.gapHeight);
+      } else {
+        // Carve from the top of the bottom pipe downward
+        const holeTop = beamY - LASER_HOLE_SIZE / 2;
+        pipe.gapY     = Math.min(holeTop, pipe.gapY);
+        pipe.gapHeight = Math.max(pipe.gapHeight, (beamY + LASER_HOLE_SIZE / 2) - pipe.gapY);
+      }
+    }
+
+    return {
+      y:      beamY,
+      fromX:  ghosty.x + ghosty.width,
+      toX:    canvasWidth,
+      age:    0,
+      maxAge: LASER_BEAM_DURATION,
+      opacity: 1,
+    };
+  }
+
   // Update all effects each frame
   // elapsed: ms since last frame
   // dtSec: seconds since last frame
-  function updateEffects(particles, popups, shake, elapsed, dtSec) {
+  function updateEffects(particles, popups, shake, elapsed, dtSec, laserBeams) {
     // Update particles
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
@@ -363,6 +407,16 @@
 
     // Advance shake timer
     if (shake) shake.elapsed += elapsed;
+
+    // Update laser beams
+    if (laserBeams) {
+      for (let i = laserBeams.length - 1; i >= 0; i--) {
+        const b = laserBeams[i];
+        b.age    += elapsed;
+        b.opacity = Math.max(0, 1 - b.age / b.maxAge);
+        if (b.age >= b.maxAge) laserBeams.splice(i, 1);
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -411,8 +465,25 @@
       this._gameOverAudio.play().catch(() => {});
     }
 
-    playScore() {
+    playLaser() {
       this._ensureCtx();
+      if (!this._ctx || this._disabled) return;
+      try {
+        const osc  = this._ctx.createOscillator();
+        const gain = this._ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(1200, this._ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(200, this._ctx.currentTime + 0.25);
+        gain.gain.setValueAtTime(0.4, this._ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, this._ctx.currentTime + 0.25);
+        osc.connect(gain);
+        gain.connect(this._ctx.destination);
+        osc.start(this._ctx.currentTime);
+        osc.stop(this._ctx.currentTime + 0.25);
+      } catch (_) {}
+    }
+
+    playScore() {      this._ensureCtx();
       if (!this._ctx || this._disabled) return;
       try {
         const osc  = this._ctx.createOscillator();
@@ -537,15 +608,20 @@
       // Cache canvas dimensions — updated on resize via Game._resize
       this._w = canvas.width;
       this._h = canvas.height;
+      // Offscreen canvas for pre-rendered background texture
+      this._bgCanvas = null;
+      this._bgW      = 0;
+      this._bgH      = 0;
     }
 
-    /** Call on resize to update cached dimensions. */
+    /** Call on resize to update cached dimensions and invalidate bg cache. */
     resize() {
-      this._w = this.canvas.width;
-      this._h = this.canvas.height;
+      this._w    = this.canvas.width;
+      this._h    = this.canvas.height;
+      this._bgCanvas = null; // invalidate — will be rebuilt next draw
     }
 
-    draw(gameState, ghosty, pipes, clouds, particles, popups, shake, score, highScore, timestamp) {
+    draw(gameState, ghosty, pipes, clouds, particles, popups, shake, score, highScore, timestamp, laserBeams, laserCooldownMs) {
       const ctx = this.ctx;
       ctx.save();
 
@@ -576,11 +652,14 @@
       // 5. Particles
       this._drawParticles(ctx, particles);
 
-      // 6. Score popups
+      // 6. Laser beams (above particles, below popups)
+      this._drawLaserBeams(ctx, laserBeams);
+
+      // 7. Score popups
       this._drawPopups(ctx, popups);
 
-      // 7. HUD
-      this._drawHUD(ctx, score, highScore);
+      // 8. HUD
+      this._drawHUD(ctx, score, highScore, laserCooldownMs);
 
       // 8. Overlay
       this._drawOverlay(ctx, gameState, score, highScore, timestamp);
@@ -589,22 +668,29 @@
     }
 
     _drawBackground(ctx) {
-      ctx.fillStyle = '#87CEEB';
-      ctx.fillRect(0, 0, this._w, this._h);
-      // Sketchy texture
-      ctx.save();
-      ctx.globalAlpha = 0.04;
-      ctx.strokeStyle = '#5ba8d4';
-      ctx.lineWidth   = 1;
-      for (let i = 0; i < 40; i++) {
-        const x = Math.random() * this._w;
-        const y = Math.random() * this._h;
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(x + (Math.random() - 0.5) * 60, y + (Math.random() - 0.5) * 40);
-        ctx.stroke();
+      // Build offscreen cache once per canvas size
+      if (!this._bgCanvas || this._bgW !== this._w || this._bgH !== this._h) {
+        this._bgCanvas = document.createElement('canvas');
+        this._bgCanvas.width  = this._w;
+        this._bgCanvas.height = this._h;
+        this._bgW = this._w;
+        this._bgH = this._h;
+        const bctx = this._bgCanvas.getContext('2d');
+        bctx.fillStyle = '#87CEEB';
+        bctx.fillRect(0, 0, this._w, this._h);
+        bctx.globalAlpha = 0.04;
+        bctx.strokeStyle = '#5ba8d4';
+        bctx.lineWidth   = 1;
+        for (let i = 0; i < 40; i++) {
+          const x = Math.random() * this._w;
+          const y = Math.random() * this._h;
+          bctx.beginPath();
+          bctx.moveTo(x, y);
+          bctx.lineTo(x + (Math.random() - 0.5) * 60, y + (Math.random() - 0.5) * 40);
+          bctx.stroke();
+        }
       }
-      ctx.restore();
+      ctx.drawImage(this._bgCanvas, 0, 0);
     }
 
     _drawClouds(ctx, clouds) {
@@ -627,26 +713,26 @@
     }
 
     _drawPipes(ctx, pipes) {
+      // Set shared pipe fill style once
+      ctx.fillStyle = '#2d8a2d';
+      // Set shadow/stroke state once for all pipe outlines
+      ctx.save();
+      ctx.strokeStyle = '#1a5c1a';
+      ctx.lineWidth   = 3;
+      ctx.lineJoin    = 'round';
+      ctx.shadowColor = '#1a5c1a';
+      ctx.shadowBlur  = 4;
       for (const pipe of pipes) {
-        // Top pipe
         this._drawPipeRect(ctx, pipe.x, 0, pipe.width, pipe.gapY);
-        // Bottom pipe
         this._drawPipeRect(ctx, pipe.x, pipe.gapY + pipe.gapHeight, pipe.width, this._h - (pipe.gapY + pipe.gapHeight));
       }
+      ctx.restore();
     }
 
     _drawPipeRect(ctx, x, y, w, h) {
       if (h <= 0) return;
-      ctx.fillStyle = '#2d8a2d';
       ctx.fillRect(x, y, w, h);
-      ctx.save();
-      ctx.strokeStyle  = '#1a5c1a';
-      ctx.lineWidth    = 3;
-      ctx.lineJoin     = 'round';
-      ctx.shadowColor  = '#1a5c1a';
-      ctx.shadowBlur   = 4;
       ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
-      ctx.restore();
     }
 
     _drawGhosty(ctx, ghosty, gameState, timestamp) {
@@ -680,15 +766,17 @@
     }
 
     _drawParticles(ctx, particles) {
+      if (particles.length === 0) return;
+      ctx.save();
+      ctx.fillStyle = '#ffffff';
       for (const p of particles) {
-        ctx.save();
         ctx.globalAlpha = p.opacity * 0.6;
-        ctx.fillStyle   = '#ffffff';
         ctx.beginPath();
         ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
         ctx.fill();
-        ctx.restore();
       }
+      ctx.globalAlpha = 1;
+      ctx.restore();
     }
 
     _drawPopups(ctx, popups) {
@@ -703,10 +791,37 @@
       }
     }
 
-    _drawHUD(ctx, score, highScore) {
+    _drawLaserBeams(ctx, beams) {
+      if (!beams || beams.length === 0) return;
+      for (const b of beams) {
+        ctx.save();
+        ctx.globalAlpha  = b.opacity;
+        ctx.strokeStyle  = '#00ffff';
+        ctx.lineWidth    = 4;
+        ctx.shadowColor  = '#00ffff';
+        ctx.shadowBlur   = 18;
+        ctx.beginPath();
+        ctx.moveTo(b.fromX, b.y);
+        ctx.lineTo(b.toX,   b.y);
+        ctx.stroke();
+        // Bright white core
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth   = 1.5;
+        ctx.shadowBlur  = 0;
+        ctx.beginPath();
+        ctx.moveTo(b.fromX, b.y);
+        ctx.lineTo(b.toX,   b.y);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    _drawHUD(ctx, score, highScore, laserCooldownMs) {
       const barH = 40;
       ctx.fillStyle = '#1a1a2e';
       ctx.fillRect(0, this._h - barH, this._w, barH);
+
+      // Centre: score
       ctx.fillStyle = '#ffffff';
       ctx.font      = '18px "Courier New", monospace';
       ctx.textAlign = 'center';
@@ -715,6 +830,17 @@
         this._w / 2,
         this._h - barH / 2 + 6
       );
+
+      // Bottom-left: laser cooldown
+      ctx.textAlign = 'left';
+      if (laserCooldownMs <= 0) {
+        ctx.fillStyle = '#00ffff';
+        ctx.fillText('⚡ LASER [L]', 12, this._h - barH / 2 + 6);
+      } else {
+        const secs = Math.ceil(laserCooldownMs / 1000);
+        ctx.fillStyle = '#aaaaaa';
+        ctx.fillText(`⚡ ${secs}s`, 12, this._h - barH / 2 + 6);
+      }
     }
 
     _drawOverlay(ctx, gameState, score, highScore, timestamp) {
@@ -796,10 +922,12 @@
       this._clouds    = [];
       this._particles = [];
       this._popups    = [];
+      this._laserBeams = [];
       this._shake     = null;
       this._pipeTimer          = 0;
       this._cloudTimer         = 0;
       this._nextCloudInterval  = null;
+      this._laserCooldown      = 0; // ms remaining before laser is ready (0 = ready)
 
       this._scoreManager.load();
       this._inputHandler.attach(this._canvas, () => this.state);
@@ -831,7 +959,9 @@
         this._shake,
         this._scoreManager.score,
         this._scoreManager.highScore,
-        timestamp
+        timestamp,
+        this._laserBeams,
+        this._laserCooldown
       );
 
       requestAnimationFrame(t => this._loop(t));
@@ -842,7 +972,7 @@
       this._ghosty.updateTimers(elapsed);
 
       // Consume input once per frame
-      const { flap, pause } = this._inputHandler.flush();
+      const { flap, pause, laser } = this._inputHandler.flush();
 
       // Pause toggle — only valid in PLAYING / PAUSED
       if (pause) {
@@ -862,8 +992,18 @@
         else if (this.state === GameState.GAME_OVER) this.transitionTo(GameState.MENU);
       }
 
+      // Laser fire — only while playing and cooldown expired
+      if (laser && this.state === GameState.PLAYING && this._laserCooldown <= 0) {
+        this._laserBeams.push(fireLaser(this._ghosty, this._pipes, this._canvas.width));
+        this._laserCooldown = LASER_RECHARGE_MS;
+        this._audioManager.playLaser();
+      }
+
       // Everything below only runs while actively playing
       if (this.state !== GameState.PLAYING) return;
+
+      // Tick laser cooldown
+      if (this._laserCooldown > 0) this._laserCooldown = Math.max(0, this._laserCooldown - elapsed);
 
       // Physics
       this._physicsEngine.update(this._ghosty, dtSec, this.state);
@@ -897,11 +1037,10 @@
         return;
       }
 
-      // Scoring — checkPipes returns true when a pipe is newly passed
-      if (this._scoreManager.checkPipes(this._pipes, this._ghosty)) {
-        // Find the pipe that was just scored to place the popup
-        const scoredPipe = this._pipes.find(p => p.scored && p.x + p.width < this._ghosty.x);
-        if (scoredPipe) this._popups.push(createScorePopup(scoredPipe));
+      // Scoring — checkPipes returns the scored pipe, or null
+      const scoredPipe = this._scoreManager.checkPipes(this._pipes, this._ghosty);
+      if (scoredPipe) {
+        this._popups.push(createScorePopup(scoredPipe));
         this._audioManager.playScore();
       }
 
@@ -909,7 +1048,7 @@
       this._particles.push(emitParticle(this._ghosty));
 
       // Advance all visual effects
-      updateEffects(this._particles, this._popups, this._shake, elapsed, dtSec);
+      updateEffects(this._particles, this._popups, this._shake, elapsed, dtSec, this._laserBeams);
     }
 
     transitionTo(newState) {
@@ -958,6 +1097,8 @@
       this._pipeTimer          = 0;
       this._cloudTimer         = 0;
       this._nextCloudInterval  = null;
+      this._laserBeams.length  = 0;
+      this._laserCooldown      = 0;
       this._scoreManager.reset();
     }
   }

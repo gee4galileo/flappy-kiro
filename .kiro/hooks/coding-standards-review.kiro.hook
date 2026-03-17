@@ -1,0 +1,15 @@
+{
+  "enabled": true,
+  "name": "Coding Standards Review",
+  "description": "Manually triggered review of game.js for coding standards, class naming conventions, and performance patterns from game-coding-standards.md.",
+  "version": "1.0.0",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Review game.js against the Flappy Kiro coding standards. Check the following three areas only. Be specific — cite the function or class name for each issue.\n\n1. CLASS NAMING CONVENTIONS\n- Classes not in PascalCase (e.g. PhysicsEngine, AudioManager, CollisionDetector)\n- Class instances not in camelCase (e.g. const physicsEngine = new PhysicsEngine())\n- Runtime constants not in SCREAMING_SNAKE_CASE (e.g. MAX_DELTA_TIME, LASER_RECHARGE_MS)\n- Private-by-convention properties not prefixed with _ (e.g. this._audioCtx, this._particles)\n- Boolean flags not named as questions (isX, hasX, pendingX)\n- CONFIG keys not in camelCase\n\n2. GAME LOOP & RENDERING PATTERNS\n- Game loop using setInterval instead of requestAnimationFrame\n- Delta-time not capped to CONFIG.physics.maxDeltaTime before use\n- canvas.width/height read inside the render loop instead of cached values\n- ctx.save()/restore() used where no canvas state actually changes\n- Draw order not following: background → clouds → pipes → Ghosty → particles → popups → HUD → overlays\n- clearRect missing at the start of each frame\n- ctx.globalAlpha not reset to 1 after transient effect draws\n- shadowBlur not reset to 0 after pipe draw calls\n\n3. PERFORMANCE PATTERNS\n- new object allocations inside the hot path (update or render loop)\n- Array.splice() in forward iteration (must iterate backwards)\n- Per-frame use of allocating array methods: map, filter, find, forEach\n- DOM queries (getElementById, querySelector) inside the loop\n- Image loaded more than once (ghosty.png must be loaded once at init)\n- Event listeners registered inside update() or the render loop\n\nReport findings grouped by category. If a category has no issues, say 'No issues found'. Do not report correctness, security, or unrelated concerns."
+  },
+  "workspaceFolderName": "kiro-introduction",
+  "shortName": "coding-standards-review"
+}

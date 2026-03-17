@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Animation, Input & Asset Standards",
+  "description": "Manually triggered review of game.js for animation frame handling correctness, input responsiveness patterns, and asset management efficiency.",
+  "version": "1",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Review game.js for the following three areas only. Be specific — cite the function or class name for each issue found.\n\n1. ANIMATION FRAME HANDLING\n- Game loop using setInterval or setTimeout instead of requestAnimationFrame\n- elapsed not capped to CONFIG.physics.maxDeltaTime before physics updates (allows tunneling on tab restore)\n- _lastTimestamp not reset on visibilitychange (causes a giant elapsed spike on first frame after tab is hidden)\n- timestamp argument from rAF not used — Date.now() or performance.now() called inside the loop instead\n- requestAnimationFrame callback not re-registered at the end of each loop iteration (loop would stop after one frame)\n- Animation timers (flapTimer, deathTimer) not advanced every frame regardless of game state\n- Bob/rotation calculations running in states where they have no effect (minor, flag only if clearly wasteful)\n\n2. INPUT RESPONSIVENESS\n- InputHandler.flush() called more than once per frame (flags consumed twice)\n- Event listeners registered inside update() or the render loop instead of once at init\n- Flap not suppressed when state is PAUSED (player input should be ignored while paused)\n- Pause toggle processed in states other than PLAYING and PAUSED\n- pendingFlap or pendingPause not cleared after flush() (stale input carried to next frame)\n- Keyboard listener missing from window — only on canvas (breaks when canvas lacks focus)\n- touchstart listener missing { passive: true } option\n\n3. ASSET MANAGEMENT\n- ghosty.png Image object created more than once (must be loaded once at Ghosty construction, reused every frame)\n- Audio elements (jump.wav, game_over.wav) created inside playFlap/playGameOver instead of at AudioManager construction\n- AudioContext created eagerly at construction instead of lazily on first user gesture (blocks autoplay policy)\n- Offscreen background canvas not invalidated on resize (stale cached texture drawn at wrong dimensions)\n- Asset load errors not handled (missing img.onerror fallback flag, missing Audio error handling)\n- Audio.play() promise rejection not caught silently (unhandled rejection crashes the game)\n\nReport findings grouped by category. If a category has no issues, say 'No issues found'. Do not report style, correctness, or unrelated concerns."
+  }
+}
