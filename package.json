@@ -1,0 +1,11 @@
+{
+  "name": "flappy-kiro",
+  "version": "1.0.0",
+  "description": "Flappy Kiro browser game",
+  "scripts": {
+    "test": "node --test tests/**/*.test.js"
+  },
+  "devDependencies": {
+    "fast-check": "^3.22.0"
+  }
+}
