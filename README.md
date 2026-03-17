@@ -16,8 +16,8 @@ python3 -m http.server 8080
 | Action | Input |
 |---|---|
 | Flap / advance state | Space, click, or tap |
-| Pause / resume | P or Escape |
-| Fire laser | L |
+| Pause / resume | P or Escape (desktop) / tap while paused (mobile) |
+| Fire laser | L (desktop only) |
 
 ### Game States
 
@@ -38,14 +38,15 @@ stateDiagram-v2
 
 ```
 flappy-kiro/
-├── index.html        # Full-viewport canvas, loads config.js then game.js
-├── config.js         # Frozen CONFIG object — all tunable constants
-├── game.js           # Entire game inside one IIFE (no modules)
+├── index.html          # Full-viewport canvas, loads config.js then game.js
+├── config.js           # Frozen CONFIG object — all tunable constants
+├── game-config.json    # Source-of-truth physics/pipe/cloud/effect values
+├── game.js             # Entire game inside one IIFE (no modules)
 ├── assets/
-│   ├── ghosty.png    # 32×32 sprite
-│   ├── jump.wav      # Flap SFX
-│   └── game_over.wav # Game over SFX
-└── tests/            # Node.js property-based tests (fast-check)
+│   ├── ghosty.png      # 32×32 sprite
+│   ├── jump.wav        # Flap SFX
+│   └── game_over.wav   # Game over SFX
+└── tests/              # Node.js property-based tests (fast-check)
     ├── helpers.js
     ├── physics.test.js
     ├── collision.test.js
@@ -54,7 +55,9 @@ flappy-kiro/
     ├── obstacles.test.js
     ├── state.test.js
     ├── input.test.js
-    └── renderer.test.js
+    ├── renderer.test.js
+    ├── build.test.js
+    └── markup.test.js
 ```
 
 ---
@@ -117,6 +120,9 @@ sequenceDiagram
 ---
 
 ## Component Reference
+
+### `ObjectPool`
+Generic fixed-capacity pool to avoid GC pressure in the hot path. Used for particles and score popups. `acquire()` returns a recycled object; `release(obj)` returns it to the pool. Falls back to allocating a new object when the pool is exhausted.
 
 ### `CONFIG` (`config.js`)
 Frozen nested object loaded before `game.js`. All physics, pipe, cloud, effect, and audio constants live here. Never mutate — use multipliers for difficulty scaling.
@@ -212,7 +218,7 @@ Tests cover 20 correctness properties (P1–P20) across physics, obstacles, coll
 
 ## Configuration
 
-Edit `config.js` to tune game feel. Key values:
+Edit `config.js` to tune game feel (values are sourced from `game-config.json`). Key values:
 
 | Key | Default | Effect |
 |---|---|---|
@@ -220,5 +226,6 @@ Edit `config.js` to tune game feel. Key values:
 | `physics.jumpVelocity` | -300 px/s | More negative = higher jump |
 | `pipes.speed` | 120 px/s | Higher = faster pipes |
 | `pipes.gapHeight` | 140 px | Smaller = harder |
+| `pipes.spacing` | 750 px | Smaller = pipes closer together |
 | `pipes.spawnInterval` | 1800 ms | Lower = more frequent pipes |
 | `effects.particleMaxAge` | 500 ms | Longer = longer particle trail |
