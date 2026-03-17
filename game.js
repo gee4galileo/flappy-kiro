@@ -13,6 +13,32 @@
   });
 
   // ---------------------------------------------------------------------------
+  // ObjectPool — generic fixed-capacity object pool to eliminate GC pressure
+  // ---------------------------------------------------------------------------
+  class ObjectPool {
+    constructor(factory, capacity) {
+      this._pool   = Array.from({ length: capacity }, factory);
+      this._active = new Set();
+    }
+
+    acquire() {
+      for (const obj of this._pool) {
+        if (!this._active.has(obj)) {
+          this._active.add(obj);
+          return obj;
+        }
+      }
+      return null; // pool exhausted — caller skips emission
+    }
+
+    release(obj) {
+      this._active.delete(obj);
+    }
+
+    get activeCount() { return this._active.size; }
+  }
+
+  // ---------------------------------------------------------------------------
   // Ghosty — character data + animation state
   // ---------------------------------------------------------------------------
   class Ghosty {
@@ -385,7 +411,7 @@
   // Update all effects each frame
   // elapsed: ms since last frame
   // dtSec: seconds since last frame
-  function updateEffects(particles, popups, shake, elapsed, dtSec, laserBeams) {
+  function updateEffects(particles, popups, shake, elapsed, dtSec, laserBeams, particlePool, popupPool) {
     // Update particles
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
@@ -393,7 +419,10 @@
       p.opacity  = Math.max(0, 1 - p.age / p.maxAge);
       p.x       += p.vx * dtSec;
       p.y       += p.vy * dtSec;
-      if (p.age >= p.maxAge) particles.splice(i, 1);
+      if (p.age >= p.maxAge) {
+        if (particlePool) particlePool.release(p);
+        particles.splice(i, 1);
+      }
     }
 
     // Update score popups
@@ -402,7 +431,10 @@
       popup.age     += elapsed;
       popup.opacity  = Math.max(0, 1 - popup.age / popup.maxAge);
       popup.offsetY  = (popup.age / popup.maxAge) * CONFIG.effects.popupRiseDistance;
-      if (popup.age >= popup.maxAge) popups.splice(i, 1);
+      if (popup.age >= popup.maxAge) {
+        if (popupPool) popupPool.release(popup);
+        popups.splice(i, 1);
+      }
     }
 
     // Advance shake timer
@@ -599,30 +631,56 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Seeded LCG — deterministic pseudo-random sequence for background texture.
+  // seed = canvas.width * 31 + canvas.height (unique per physical canvas size)
+  // ---------------------------------------------------------------------------
+  function seededRandom(seed) {
+    let s = seed >>> 0; // ensure unsigned 32-bit
+    return function () {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+      return s / 0xffffffff;
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // Renderer (Task 11)
   // ---------------------------------------------------------------------------
   class Renderer {
     constructor(canvas) {
       this.canvas = canvas;
-      this.ctx    = canvas.getContext('2d');
+      this.ctx    = canvas.getContext('2d', { alpha: false, willReadFrequently: false });
       // Cache canvas dimensions — updated on resize via Game._resize
-      this._w = canvas.width;
-      this._h = canvas.height;
+      this._w   = canvas.width;
+      this._h   = canvas.height;
+      this._dpr = 1;
       // Offscreen canvas for pre-rendered background texture
       this._bgCanvas = null;
       this._bgW      = 0;
       this._bgH      = 0;
     }
 
-    /** Call on resize to update cached dimensions and invalidate bg cache. */
+    /** Call on resize to update cached dimensions, DPR scale, and invalidate bg cache. */
     resize() {
       this._w    = this.canvas.width;
       this._h    = this.canvas.height;
+      this._dpr  = window.devicePixelRatio || 1;
+      // Apply DPR scale transform — replaces current transform to prevent accumulation
+      if (this.ctx.setTransform) {
+        this.ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
+      } else {
+        this.ctx.scale(this._dpr, this._dpr);
+      }
       this._bgCanvas = null; // invalidate — will be rebuilt next draw
     }
 
     draw(gameState, ghosty, pipes, clouds, particles, popups, shake, score, highScore, timestamp, laserBeams, laserCooldownMs) {
       const ctx = this.ctx;
+      // Reapply DPR scale transform at the start of each frame to prevent accumulation
+      if (ctx.setTransform) {
+        ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
+      } else {
+        ctx.scale(this._dpr, this._dpr);
+      }
       ctx.save();
 
       // Apply screen shake before all draws
@@ -668,25 +726,29 @@
     }
 
     _drawBackground(ctx) {
-      // Build offscreen cache once per canvas size
-      if (!this._bgCanvas || this._bgW !== this._w || this._bgH !== this._h) {
-        this._bgCanvas = document.createElement('canvas');
-        this._bgCanvas.width  = this._w;
-        this._bgCanvas.height = this._h;
-        this._bgW = this._w;
-        this._bgH = this._h;
+      // Build offscreen cache once per physical canvas size (invalidated on resize)
+      if (!this._bgCanvas || this._bgW !== this.canvas.width || this._bgH !== this.canvas.height) {
+        const pw = this.canvas.width;
+        const ph = this.canvas.height;
+        this._bgCanvas        = document.createElement('canvas');
+        this._bgCanvas.width  = pw;
+        this._bgCanvas.height = ph;
+        this._bgW = pw;
+        this._bgH = ph;
         const bctx = this._bgCanvas.getContext('2d');
         bctx.fillStyle = '#87CEEB';
-        bctx.fillRect(0, 0, this._w, this._h);
+        bctx.fillRect(0, 0, pw, ph);
         bctx.globalAlpha = 0.04;
         bctx.strokeStyle = '#5ba8d4';
         bctx.lineWidth   = 1;
+        // Deterministic texture — seeded so it never flickers between rebuilds
+        const rand = seededRandom(pw * 31 + ph);
         for (let i = 0; i < 40; i++) {
-          const x = Math.random() * this._w;
-          const y = Math.random() * this._h;
+          const x = rand() * pw;
+          const y = rand() * ph;
           bctx.beginPath();
           bctx.moveTo(x, y);
-          bctx.lineTo(x + (Math.random() - 0.5) * 60, y + (Math.random() - 0.5) * 40);
+          bctx.lineTo(x + (rand() - 0.5) * 60, y + (rand() - 0.5) * 40);
           bctx.stroke();
         }
       }
@@ -701,10 +763,10 @@
         ctx.lineWidth   = 2;
         ctx.beginPath();
         if (ctx.roundRect) {
-          ctx.roundRect(cloud.x, cloud.y, cloud.width, cloud.height, 12);
+          ctx.roundRect(Math.round(cloud.x), Math.round(cloud.y), Math.round(cloud.width), Math.round(cloud.height), 12);
         } else {
           // Fallback for older browsers
-          ctx.rect(cloud.x, cloud.y, cloud.width, cloud.height);
+          ctx.rect(Math.round(cloud.x), Math.round(cloud.y), Math.round(cloud.width), Math.round(cloud.height));
         }
         ctx.fill();
         ctx.stroke();
@@ -726,13 +788,18 @@
         this._drawPipeRect(ctx, pipe.x, 0, pipe.width, pipe.gapY);
         this._drawPipeRect(ctx, pipe.x, pipe.gapY + pipe.gapHeight, pipe.width, this._h - (pipe.gapY + pipe.gapHeight));
       }
+      // Explicitly clear shadow state before restore to prevent bleed into
+      // subsequent draws (particles, HUD) in browsers that don't fully isolate
+      // shadow properties within save/restore. Runs even when pipes is empty.
+      ctx.shadowBlur  = 0;
+      ctx.shadowColor = 'transparent';
       ctx.restore();
     }
 
     _drawPipeRect(ctx, x, y, w, h) {
       if (h <= 0) return;
-      ctx.fillRect(x, y, w, h);
-      ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+      ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+      ctx.strokeRect(Math.round(x) + 1, Math.round(y) + 1, Math.round(w) - 2, Math.round(h) - 2);
     }
 
     _drawGhosty(ctx, ghosty, gameState, timestamp) {
@@ -753,7 +820,7 @@
       ctx.rotate(rotation);
 
       if (ghosty.imgLoaded) {
-        ctx.drawImage(ghosty.img, -ghosty.width / 2, -ghosty.height / 2, ghosty.width, ghosty.height);
+        ctx.drawImage(ghosty.img, Math.round(-ghosty.width / 2), Math.round(-ghosty.height / 2), ghosty.width, ghosty.height);
       } else {
         // Fallback: white circle
         ctx.beginPath();
@@ -929,13 +996,26 @@
       this._nextCloudInterval  = null;
       this._laserCooldown      = 0; // ms remaining before laser is ready (0 = ready)
 
+      this._particlePool = new ObjectPool(() => ({}), 60);
+      this._popupPool    = new ObjectPool(() => ({}), 10);
+
       this._scoreManager.load();
       this._inputHandler.attach(this._canvas, () => this.state);
+
+      // Reset timestamp on tab re-focus to prevent a large elapsed spike
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) this._lastTimestamp = performance.now();
+      });
     }
 
     _resize() {
-      this._canvas.width  = window.innerWidth;
-      this._canvas.height = window.innerHeight;
+      const dpr      = window.devicePixelRatio || 1;
+      const logicalW = window.innerWidth;
+      const logicalH = window.innerHeight;
+      this._canvas.width        = Math.round(logicalW * dpr);
+      this._canvas.height       = Math.round(logicalH * dpr);
+      this._canvas.style.width  = logicalW + 'px';
+      this._canvas.style.height = logicalH + 'px';
       if (this._renderer) this._renderer.resize();
     }
 
@@ -948,7 +1028,11 @@
       this._lastTimestamp = timestamp;
       const dtSec = Math.min(elapsed, CONFIG.physics.maxDeltaTime) / 1000;
 
-      this._update(elapsed, dtSec, timestamp);
+      // Cache canvas dimensions once per frame — never read canvas.width/height inside loops
+      const cw = this._canvas.width;
+      const ch = this._canvas.height;
+
+      this._update(elapsed, dtSec, timestamp, cw, ch);
       this._renderer.draw(
         this.state,
         this._ghosty,
@@ -967,7 +1051,7 @@
       requestAnimationFrame(t => this._loop(t));
     }
 
-    _update(elapsed, dtSec, timestamp) {
+    _update(elapsed, dtSec, timestamp, cw, ch) {
       // Advance Ghosty animation timers every frame regardless of state
       this._ghosty.updateTimers(elapsed);
 
@@ -994,7 +1078,7 @@
 
       // Laser fire — only while playing and cooldown expired
       if (laser && this.state === GameState.PLAYING && this._laserCooldown <= 0) {
-        this._laserBeams.push(fireLaser(this._ghosty, this._pipes, this._canvas.width));
+        this._laserBeams.push(fireLaser(this._ghosty, this._pipes, cw));
         this._laserCooldown = LASER_RECHARGE_MS;
         this._audioManager.playLaser();
       }
@@ -1011,7 +1095,7 @@
       // Pipe spawn timer
       this._pipeTimer += elapsed;
       if (this._pipeTimer >= CONFIG.pipes.spawnInterval) {
-        this._pipes.push(spawnPipe(this._canvas.width, this._canvas.height));
+        this._pipes.push(spawnPipe(cw, ch));
         this._pipeTimer = 0;
       }
 
@@ -1022,7 +1106,7 @@
       }
       this._cloudTimer += elapsed;
       if (this._cloudTimer >= this._nextCloudInterval) {
-        this._clouds.push(spawnCloud(this._canvas.width, this._canvas.height));
+        this._clouds.push(spawnCloud(cw, ch));
         this._cloudTimer = 0;
         this._nextCloudInterval = CONFIG.clouds.minInterval +
           Math.random() * (CONFIG.clouds.maxInterval - CONFIG.clouds.minInterval);
@@ -1032,7 +1116,7 @@
       updateObstacles(this._pipes, this._clouds, dtSec);
 
       // Collision detection — triggers game over
-      if (this._collisionDetector.check(this._ghosty, this._pipes, this._clouds, this._canvas.height)) {
+      if (this._collisionDetector.check(this._ghosty, this._pipes, this._clouds, ch)) {
         this.transitionTo(GameState.GAME_OVER);
         return;
       }
@@ -1040,15 +1124,34 @@
       // Scoring — checkPipes returns the scored pipe, or null
       const scoredPipe = this._scoreManager.checkPipes(this._pipes, this._ghosty);
       if (scoredPipe) {
-        this._popups.push(createScorePopup(scoredPipe));
+        const _popup = this._popupPool.acquire();
+        if (_popup !== null) {
+          _popup.x       = scoredPipe.x + scoredPipe.width / 2;
+          _popup.y       = scoredPipe.gapY + scoredPipe.gapHeight / 2;
+          _popup.offsetY = 0;
+          _popup.opacity = 1;
+          _popup.age     = 0;
+          _popup.maxAge  = CONFIG.effects.popupMaxAge;
+          this._popups.push(_popup);
+        }
         this._audioManager.playScore();
       }
 
-      // Emit one particle per frame from Ghosty's tail
-      this._particles.push(emitParticle(this._ghosty));
+      // Emit one particle per frame from Ghosty's tail (pool-backed, skip if exhausted)
+      const _p = this._particlePool.acquire();
+      if (_p !== null) {
+        _p.x       = this._ghosty.x;
+        _p.y       = this._ghosty.y + this._ghosty.height / 2;
+        _p.vx      = -30 + Math.random() * 20;
+        _p.vy      = -20 + Math.random() * 40;
+        _p.opacity = 1;
+        _p.age     = 0;
+        _p.maxAge  = CONFIG.effects.particleMaxAge;
+        this._particles.push(_p);
+      }
 
       // Advance all visual effects
-      updateEffects(this._particles, this._popups, this._shake, elapsed, dtSec, this._laserBeams);
+      updateEffects(this._particles, this._popups, this._shake, elapsed, dtSec, this._laserBeams, this._particlePool, this._popupPool);
     }
 
     transitionTo(newState) {
@@ -1091,7 +1194,10 @@
       this._ghosty.reset(this._canvas.width, this._canvas.height);
       this._pipes.length     = 0;
       this._clouds.length    = 0;
+      // Release all pooled particles and popups back to their pools
+      for (const p of this._particles) this._particlePool.release(p);
       this._particles.length = 0;
+      for (const popup of this._popups) this._popupPool.release(popup);
       this._popups.length    = 0;
       this._shake      = null;
       this._pipeTimer          = 0;

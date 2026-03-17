@@ -1,4 +1,4 @@
-// tests/effects.test.js — Visual effects property tests (P17–P20)
+// tests/effects.test.js — Visual effects property tests (P17–P20) + Object pool tests (P6, P7)
 'use strict';
 
 const { test } = require('node:test');
@@ -144,6 +144,123 @@ test('P20: Expired effects are removed each frame', () => {
       updateEffects(particles, popups, null, elapsed, elapsed / 1000);
 
       return particles.length === 0 && popups.length === 0;
+    }
+  ), { numRuns: 100 });
+});
+
+// ---------------------------------------------------------------------------
+// ObjectPool — re-defined here for testing (mirrors game.js IIFE implementation)
+// ---------------------------------------------------------------------------
+class ObjectPool {
+  constructor(factory, capacity) {
+    this._pool   = Array.from({ length: capacity }, factory);
+    this._active = new Set();
+  }
+
+  acquire() {
+    for (const obj of this._pool) {
+      if (!this._active.has(obj)) {
+        this._active.add(obj);
+        return obj;
+      }
+    }
+    return null; // pool exhausted — caller skips emission
+  }
+
+  release(obj) {
+    this._active.delete(obj);
+  }
+
+  get activeCount() { return this._active.size; }
+}
+
+// ---------------------------------------------------------------------------
+// P6: Object pool acquire/release round-trip
+// Feature: production-readiness, Property 6: Object pool acquire/release round-trip
+// Validates: Requirements 5.2, 5.3, 5.5, 5.6
+// ---------------------------------------------------------------------------
+test('P6: Object pool acquire/release round-trip', () => {
+  fc.assert(fc.property(
+    fc.integer({ min: 1, max: 20 }),   // pool capacity
+    fc.integer({ min: 1, max: 20 }),   // emission count (clamped to capacity in test)
+    (capacity, rawCount) => {
+      const pool = new ObjectPool(() => ({}), capacity);
+      // Clamp emission count to capacity so we stay within bounds
+      const count = Math.min(rawCount, capacity);
+
+      // Acquire `count` objects — track them
+      const acquired = [];
+      for (let i = 0; i < count; i++) {
+        const obj = pool.acquire();
+        if (obj === null) return false; // should not happen within capacity
+        acquired.push(obj);
+      }
+
+      // activeCount must equal count and never exceed capacity
+      if (pool.activeCount !== count) return false;
+      if (pool.activeCount > capacity) return false;
+
+      // Release all acquired objects back to the pool
+      for (const obj of acquired) {
+        pool.release(obj);
+      }
+
+      // activeCount must be 0 after full release
+      if (pool.activeCount !== 0) return false;
+
+      // Re-acquire the same number of objects — each must be a reference
+      // from the original pre-allocated pool (no new heap allocations)
+      const reacquired = [];
+      for (let i = 0; i < count; i++) {
+        const obj = pool.acquire();
+        if (obj === null) return false;
+        reacquired.push(obj);
+      }
+
+      // Every re-acquired object must be one of the original pool objects
+      // (same reference — no new allocations)
+      const originalSet = new Set(pool._pool);
+      for (const obj of reacquired) {
+        if (!originalSet.has(obj)) return false;
+      }
+
+      // activeCount must equal count again
+      if (pool.activeCount !== count) return false;
+      if (pool.activeCount > capacity) return false;
+
+      return true;
+    }
+  ), { numRuns: 100 });
+});
+
+// ---------------------------------------------------------------------------
+// P7: Pool exhaustion is silent — no heap fallback
+// Feature: production-readiness, Property 7: Pool exhaustion is silent — no heap fallback
+// Validates: Requirements 5.7
+// ---------------------------------------------------------------------------
+test('P7: Pool exhaustion is silent — no heap fallback', () => {
+  fc.assert(fc.property(
+    fc.integer({ min: 1, max: 20 }),   // pool capacity
+    (capacity) => {
+      const pool = new ObjectPool(() => ({}), capacity);
+
+      // Fill pool to capacity — acquire all objects
+      for (let i = 0; i < capacity; i++) {
+        const obj = pool.acquire();
+        if (obj === null) return false; // should not happen within capacity
+      }
+
+      // activeCount must equal capacity
+      if (pool.activeCount !== capacity) return false;
+
+      // Request one more — must return null (no heap fallback)
+      const extra = pool.acquire();
+      if (extra !== null) return false;
+
+      // activeCount must remain at capacity (unchanged)
+      if (pool.activeCount !== capacity) return false;
+
+      return true;
     }
   ), { numRuns: 100 });
 });

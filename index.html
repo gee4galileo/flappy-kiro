@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Flappy Kiro</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #000; overflow: hidden; width: 100vw; height: 100vh; }
-    canvas { display: block; }
+    body { background: #000; overflow: hidden; width: 100vw; height: 100vh; padding-bottom: env(safe-area-inset-bottom); }
+    canvas { display: block; touch-action: none; }
   </style>
 </head>
 <body>

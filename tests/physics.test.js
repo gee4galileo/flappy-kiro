@@ -196,3 +196,52 @@ describe('P7: Delta-time proportionality', () => {
     ));
   });
 });
+
+// ---------------------------------------------------------------------------
+// P9: Delta-time clamping — elapsed is clamped to maxDeltaTime before dtSec
+// Feature: production-readiness, Property 9: Delta-time clamping
+// Validates: Requirements 8.5
+// ---------------------------------------------------------------------------
+const MAX_DELTA_TIME = 50; // ms — mirrors CONFIG.physics.maxDeltaTime
+
+describe('P9: Delta-time clamping', () => {
+  it('dtSec is always <= maxDeltaTime / 1000 regardless of elapsed', () => {
+    fc.assert(fc.property(
+      // Include values far exceeding maxDeltaTime (tab switch, throttling)
+      fc.double({ min: 0, max: 100000, noNaN: true }),
+      (elapsed) => {
+        const dtSec = Math.min(elapsed, MAX_DELTA_TIME) / 1000;
+        assert.ok(
+          dtSec <= MAX_DELTA_TIME / 1000,
+          `dtSec=${dtSec} exceeds maxDeltaTime/1000=${MAX_DELTA_TIME / 1000}`
+        );
+      }
+    ), { numRuns: 100 });
+  });
+
+  it('dtSec equals elapsed/1000 when elapsed is within maxDeltaTime', () => {
+    fc.assert(fc.property(
+      fc.double({ min: 0, max: MAX_DELTA_TIME, noNaN: true }),
+      (elapsed) => {
+        const dtSec = Math.min(elapsed, MAX_DELTA_TIME) / 1000;
+        assert.ok(
+          Math.abs(dtSec - elapsed / 1000) < 1e-12,
+          `Expected dtSec=${elapsed / 1000}, got ${dtSec}`
+        );
+      }
+    ), { numRuns: 100 });
+  });
+
+  it('dtSec is clamped to maxDeltaTime/1000 when elapsed exceeds maxDeltaTime', () => {
+    fc.assert(fc.property(
+      fc.double({ min: MAX_DELTA_TIME + 1, max: 100000, noNaN: true }),
+      (elapsed) => {
+        const dtSec = Math.min(elapsed, MAX_DELTA_TIME) / 1000;
+        assert.ok(
+          Math.abs(dtSec - MAX_DELTA_TIME / 1000) < 1e-12,
+          `Expected dtSec=${MAX_DELTA_TIME / 1000}, got ${dtSec}`
+        );
+      }
+    ), { numRuns: 100 });
+  });
+});

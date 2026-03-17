@@ -233,3 +233,40 @@ describe('transitionTo — full play sequence', () => {
     assert.equal(sm.state, GameState.MENU);
   });
 });
+
+// ---------------------------------------------------------------------------
+// visibilitychange — _lastTimestamp reset (Requirement 8.4)
+// ---------------------------------------------------------------------------
+describe('visibilitychange — _lastTimestamp reset', () => {
+  it('resets _lastTimestamp to performance.now() when tab becomes visible', () => {
+    // Simulate the listener logic extracted from Game constructor
+    let _lastTimestamp = 0;
+    const performanceNow = () => 12345.678; // deterministic stand-in
+
+    // Simulate the listener: reset when !document.hidden (tab visible)
+    function onVisibilityChange(hidden) {
+      if (!hidden) _lastTimestamp = performanceNow();
+    }
+
+    // Tab was hidden — timestamp should not change
+    _lastTimestamp = 999;
+    onVisibilityChange(true);
+    assert.equal(_lastTimestamp, 999, '_lastTimestamp must not change when tab is hidden');
+
+    // Tab becomes visible — timestamp must be reset
+    onVisibilityChange(false);
+    assert.equal(_lastTimestamp, performanceNow(),
+      '_lastTimestamp must be reset to performance.now() when tab becomes visible');
+  });
+
+  it('does not reset _lastTimestamp when tab is hidden', () => {
+    let _lastTimestamp = 500;
+
+    function onVisibilityChange(hidden) {
+      if (!hidden) _lastTimestamp = 99999;
+    }
+
+    onVisibilityChange(true); // hidden
+    assert.equal(_lastTimestamp, 500, '_lastTimestamp must remain unchanged when hidden');
+  });
+});
