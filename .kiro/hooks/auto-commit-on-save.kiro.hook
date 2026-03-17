@@ -1,0 +1,18 @@
+{
+  "enabled": true,
+  "name": "Auto Commit on Save",
+  "description": "When a file is saved, stages it and creates a local commit with a descriptive message based on the filename and changes. Never pushes to remote.",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "~/Projects/AWS Kiro/kiro-introduction/*"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A file was just saved. Stage the changed file using `git add` and create a local commit with a concise, descriptive commit message based on the filename and the nature of the changes. Use `git diff --cached` or `git diff` to understand what changed and craft the message accordingly. Do NOT run `git push` or any command that sends changes to a remote repository."
+  },
+  "workspaceFolderName": "kiro-introduction",
+  "shortName": "auto-commit-on-save"
+}
