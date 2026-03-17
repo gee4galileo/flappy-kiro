@@ -10,7 +10,7 @@
     "width": 60,
     "gapHeight": 140,
     "spacing": 750,
-    "spawnInterval": 1800
+    "spawnInterval": 3000
   },
   "clouds": {
     "speed": 60,

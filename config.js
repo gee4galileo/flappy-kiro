@@ -10,9 +10,9 @@ const CONFIG = Object.freeze({
   pipes: Object.freeze({
     speed:         120,   // px/s
     width:          60,   // px
-    gapHeight:     140,   // px
-    spacing:       350,   // px between pipe pairs
-    spawnInterval: 1800,  // ms
+    gapHeight:     200,   // px
+    spacing:       750,   // px between pipe pairs
+    spawnInterval: 3000,  // ms
   }),
   clouds: Object.freeze({
     speed:       60,    // px/s
